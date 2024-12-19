@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import httpx
+import nltk
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 import re
@@ -8,6 +9,16 @@ import streamlit as st
 from nltk.stem import WordNetLemmatizer
 import asyncio
 from urllib.parse import urlparse
+
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
+
+try:
+    nltk.data.find('corpora/omw-1.4')
+except LookupError:
+    nltk.download('omw-1.4')
 
 lemmatizer = WordNetLemmatizer()
 
