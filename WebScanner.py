@@ -166,7 +166,6 @@ def compute_tfidf_scores(texts, keywords):
 
 def main():
     st.title("Website Keyword Scanner")
-    st.write("testing in progress...")
     uploaded_file = st.file_uploader("Upload a file with URLs", type=["csv", "xlsx"])
     if uploaded_file:
         if uploaded_file.name.endswith(".csv"):
