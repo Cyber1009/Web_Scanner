@@ -6,6 +6,7 @@ import re
 import textblob
 import pandas as pd
 import streamlit as st
+from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -97,7 +98,8 @@ def parse_html(content):
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
 def process_text(text):
-    words = TextBlob(text).words
+    # words = TextBlob(text).words
+    words = word_tokenize(text)
     return ' '.join([word.lemmatize() for word in words])
 
 def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
