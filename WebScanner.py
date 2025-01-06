@@ -1,32 +1,37 @@
-import pandas as pd
 import httpx
 import nltk
+import asyncio
+import re
+import pandas as pd
+import streamlit as st
+from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import re
-import streamlit as st
-from nltk.stem import WordNetLemmatizer
-import asyncio
 from urllib.parse import urlparse
 from textblob import TextBlob
 from textblob import download_corpora
 
-try:
-    nltk.data.find('corpora/wordnet')
-except LookupError:
-    nltk.download('wordnet')
+# Function to check and download missing corpora without displaying messages
+def ensure_corpora():
+    corpora = [
+        ('corpora/wordnet', 'wordnet'),
+        ('corpora/omw-1.4', 'omw-1.4')
+    ]
+    
+    for corpus_path, corpus_name in corpora:
+        try:
+            nltk.data.find(corpus_path)  # Check if corpus exists
+        except LookupError:
+            nltk.download(corpus_name)  # Download missing corpus
 
-try:
-    nltk.data.find('corpora/omw-1.4')
-except LookupError:
-    nltk.download('omw-1.4')
+    try:
+        download_corpora()  # Ensure TextBlob corpora are downloaded
+    except Exception:
+        pass  # Ignore any errors during the TextBlob corpora download
 
-try:
-    download_corpora()
-except Exception as e:
-    print("Error downloading corpora for TextBlob:", e)
-    raise e  # Reraise to handle gracefully
+# Call the function to ensure corpora are available
+ensure_corpora()
 
 lemmatizer = WordNetLemmatizer()
 
