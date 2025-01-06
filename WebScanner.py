@@ -9,7 +9,6 @@ import streamlit as st
 from nltk.stem import WordNetLemmatizer
 import asyncio
 from urllib.parse import urlparse
-import depend
 
 try:
     nltk.data.find('corpora/wordnet')
