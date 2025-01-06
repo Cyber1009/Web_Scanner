@@ -12,26 +12,21 @@ from urllib.parse import urlparse
 from textblob import TextBlob
 from textblob import download_corpora
 
-# Function to check and download missing corpora without displaying messages
-def ensure_corpora():
-    corpora = [
-        ('corpora/wordnet', 'wordnet'),
-        ('corpora/omw-1.4', 'omw-1.4')
-    ]
-    
-    for corpus_path, corpus_name in corpora:
-        try:
-            nltk.data.find(corpus_path)  # Check if corpus exists
-        except LookupError:
-            nltk.download(corpus_name)  # Download missing corpus
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
 
-    try:
-        download_corpora()  # Ensure TextBlob corpora are downloaded
-    except Exception:
-        pass  # Ignore any errors during the TextBlob corpora download
+try:
+    nltk.data.find('corpora/omw-1.4')
+except LookupError:
+    nltk.download('omw-1.4')
 
-# Call the function to ensure corpora are available
-ensure_corpora()
+try:
+    download_corpora()
+except Exception as e:
+    print("Error downloading corpora for TextBlob:", e)
+    raise e  # Reraise to handle gracefully
 
 lemmatizer = WordNetLemmatizer()
 
