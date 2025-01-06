@@ -3,6 +3,7 @@ import httpx
 import nltk
 import asyncio
 import re
+import textblob
 import pandas as pd
 import streamlit as st
 from nltk.stem import WordNetLemmatizer
