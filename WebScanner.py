@@ -3,7 +3,6 @@ import httpx
 import nltk
 import asyncio
 import re
-import textblob
 import pandas as pd
 import streamlit as st
 from nltk.tokenize import word_tokenize
@@ -12,8 +11,8 @@ from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from urllib.parse import urlparse
-from textblob import TextBlob
-from textblob import download_corpora
+# from textblob import TextBlob
+# from textblob import download_corpora
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -25,10 +24,10 @@ try:
 except LookupError:
     nltk.download('omw-1.4')
 
-try:
-    download_corpora.download_corpora()  # Try downloading corpora
-except Exception:
-    pass  # Ignore errors if corpora download fails
+# try:
+#     download_corpora.download_corpora()  # Try downloading corpora
+# except Exception:
+#     pass  # Ignore errors if corpora download fails
 
 def check_url(url_list):
     valid_urls = []
