@@ -1,13 +1,14 @@
-import pandas as pd
+
 import httpx
 import nltk
+import asyncio
+import re
+import pandas as pd
+import streamlit as st
+from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import re
-import streamlit as st
-from nltk.stem import WordNetLemmatizer
-import asyncio
 from urllib.parse import urlparse
 from textblob import TextBlob
 from textblob import download_corpora
@@ -25,8 +26,8 @@ except LookupError:
 try:
     download_corpora()
 except Exception as e:
-    print("Error downloading corpora for TextBlob:", e)
-    raise e  # Reraise to handle gracefully
+#     raise e  # Reraise to handle gracefully
+    pass
 
 lemmatizer = WordNetLemmatizer()
 
