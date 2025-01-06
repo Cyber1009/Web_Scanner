@@ -101,10 +101,19 @@ def parse_html(content):
     text = headers + " " + body  # Combine headers with body text
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
+# def process_text(text):
+#     # words = TextBlob(text).words
+#     words = word_tokenize(text)
+#     return ' '.join([word.lemmatize() for word in words])
 def process_text(text):
-    # words = TextBlob(text).words
-    words = word_tokenize(text)
-    return ' '.join([word.lemmatize() for word in words])
+# Tokenize the text using NLTK's word_tokenize
+words = word_tokenize(text)
+
+# Lemmatize each word
+lemmatized_words = [lemmatizer.lemmatize(word) for word in words]
+
+# Join the lemmatized words into a string and return
+return ' '.join(lemmatized_words)
 
 def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
 
