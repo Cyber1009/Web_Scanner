@@ -24,28 +24,10 @@ try:
 except LookupError:
     nltk.download('omw-1.4')
 
-# Function to check and download missing corpora without displaying messages
-def ensure_corpora():
-    corpora = [
-        ('corpora/wordnet', 'wordnet'),
-        ('corpora/omw-1.4', 'omw-1.4')
-    ]
-    
-    # Check and download NLTK corpora
-    for corpus_path, corpus_name in corpora:
-        try:
-            nltk.data.find(corpus_path)  # Check if corpus exists
-        except LookupError:
-            nltk.download(corpus_name)  # Download missing corpus
-
-    # Download TextBlob corpora
-    try:
-        download_corpora.download_corpora()  # Correct method to download TextBlob corpora
-    except Exception:
-        pass  # Ignore errors during TextBlob corpora download
-
-# Call the function to ensure corpora are available
-ensure_corpora()
+try:
+    download_corpora.download_corpora()  # Try downloading corpora
+except Exception:
+    pass  # Ignore errors if corpora download fails
 
 def check_url(url_list):
     valid_urls = []
