@@ -25,6 +25,7 @@ except LookupError:
 try:
     download_corpora()
 except Exception as e:
+    print("Error downloading corpora for TextBlob:", e)
     pass
 
 lemmatizer = WordNetLemmatizer()
