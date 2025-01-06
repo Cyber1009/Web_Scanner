@@ -106,14 +106,14 @@ def parse_html(content):
 #     words = word_tokenize(text)
 #     return ' '.join([word.lemmatize() for word in words])
 def process_text(text):
-# Tokenize the text using NLTK's word_tokenize
-words = word_tokenize(text)
-
-# Lemmatize each word
-lemmatized_words = [lemmatizer.lemmatize(word) for word in words]
-
-# Join the lemmatized words into a string and return
-return ' '.join(lemmatized_words)
+    # Tokenize the text using NLTK's word_tokenize
+    words = word_tokenize(text)
+    
+    # Lemmatize each word
+    lemmatized_words = [lemmatizer.lemmatize(word) for word in words]
+    
+    # Join the lemmatized words into a string and return
+    return ' '.join(lemmatized_words)
 
 def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
 
