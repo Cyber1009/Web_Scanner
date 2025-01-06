@@ -1,4 +1,3 @@
-
 import httpx
 import nltk
 import asyncio
@@ -11,8 +10,6 @@ from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from urllib.parse import urlparse
-# from textblob import TextBlob
-# from textblob import download_corpora
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -31,11 +28,6 @@ except:
 
 lemmatizer = WordNetLemmatizer()
 
-# try:
-#     download_corpora.download_corpora()  # Try downloading corpora
-# except Exception:
-#     pass  # Ignore errors if corpora download fails
-
 def check_url(url_list):
     valid_urls = []
     invalid_urls = []
@@ -52,6 +44,7 @@ def check_url(url_list):
         else:
             invalid_urls.append(u)
     return valid_urls, invalid_urls
+
 
 async def fetch_url(url, retries=2):
     headers = {
@@ -78,6 +71,7 @@ async def fetch_url(url, retries=2):
                     pass
     return url, None, False  # Final failure after all retries
 
+
 async def fetch_all_urls(urls):
     progress = st.progress(0)  # Initialize the progress bar
     total_urls = len(urls)
@@ -103,22 +97,13 @@ def parse_html(content):
     text = headers + " " + body  # Combine headers with body text
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
-# def process_text(text):
-#     # words = TextBlob(text).words
-#     words = word_tokenize(text)
-#     return ' '.join([word.lemmatize() for word in words])
 def process_text(text):
     # Tokenize the text using NLTK's word_tokenize
     words = word_tokenize(text)
-    
-    # Lemmatize each word
     lemmatized_words = [lemmatizer.lemmatize(word) for word in words]
-    
-    # Join the lemmatized words into a string and return
     return ' '.join(lemmatized_words)
 
 def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
-
     # Initialize results
     keyword_matches = []
     total_matches = []
@@ -158,7 +143,6 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
 
         # Create the TF-IDF vectorizer
         vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, len(keyword_phrase.split())))
-
         # Vectorize the content (keyword phrase + websites)
         tfidf_matrix = vectorizer.fit_transform(content)
 
@@ -167,9 +151,9 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
 
         # Combine cosine similarity with total keyword matches
         alpha = 0.7  # Weight for cosine similarity
-        beta = 0.3   # Weight for total matches
+        beta = 0.3  # Weight for total matches
         hybrid_scores = [
-            alpha * similarity + beta * (matches / (max(total_matches)+1))  # Normalize matches
+            alpha * similarity + beta * (matches / (max(total_matches) + 1))  # Normalize matches
             for similarity, matches in zip(cosine_similarities, total_matches)
         ]
 
@@ -177,16 +161,9 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
         min_score, max_score = min(hybrid_scores), max(hybrid_scores)
         if max_score > min_score:
             relevance_scores = [(score - min_score) / (max_score - min_score) for score in hybrid_scores]
-
-        # # Calculate the relevance scores
-        # relevance_scores = list(cosine_similarities)
-        #
-        # # Normalize the relevance scores to the range [0, 1]
-        # min_score, max_score = min(relevance_scores), max(relevance_scores)
-        # if max_score > min_score:
-        #     relevance_scores = [(score - min_score) / (max_score - min_score) for score in relevance_scores]
-
+            
     return keyword_matches, total_matches, relevance_scores
+
 
 def main():
     st.title("Website Keyword Scanner")
