@@ -24,7 +24,7 @@ except LookupError:
     nltk.download('omw-1.4')
 
 try:
-    download_corpora()
+    textblob.download_corpora()
 except Exception as e:
     print("Error downloading corpora for TextBlob:", e)
     raise e  # Reraise to handle gracefully
