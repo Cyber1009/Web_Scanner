@@ -1,14 +1,16 @@
 import pandas as pd
-import numpy as np
 import httpx
 import nltk
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import re
 import streamlit as st
 from nltk.stem import WordNetLemmatizer
 import asyncio
 from urllib.parse import urlparse
+from textblob import TextBlob
+from textblob import download_corpora
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -19,6 +21,12 @@ try:
     nltk.data.find('corpora/omw-1.4')
 except LookupError:
     nltk.download('omw-1.4')
+
+try:
+    download_corpora()
+except Exception as e:
+    print("Error downloading corpora for TextBlob:", e)
+    raise e  # Reraise to handle gracefully
 
 lemmatizer = WordNetLemmatizer()
 
@@ -89,80 +97,80 @@ def parse_html(content):
     text = headers + " " + body  # Combine headers with body text
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
-def compute_relevance_scores(texts, keywords, flexible_search=False):
-    """
-    Calculate relevance scores based on keyword matches.
-    - Full matches use TF-IDF.
-    - Flexible matches use regex for lemmatized keywords.
+def process_text(text):
+    words = TextBlob(text).words
+    return ' '.join([word.lemmatize() for word in words])
 
-    Parameters:
-        texts (list of str): List of parsed text from each URL.
-        keywords (list of str): List of keywords to match.
-        flexible_search (bool): Whether to enable flexible matching.
+def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
 
-    Returns:
-        np.array: Normalized relevance scores.
-    """
-    # Step 1: TF-IDF for full matches
-    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
-    tfidf_matrix = vectorizer.fit_transform(texts)
-    feature_names = vectorizer.get_feature_names_out()
+    # Initialize results
+    keyword_matches = []
+    total_matches = []
+    relevance_scores = None
 
-    # Identify indices of keywords in the TF-IDF matrix
-    full_match_indices = [i for i, term in enumerate(feature_names) if term in keywords]
-    full_match_scores = tfidf_matrix[:, full_match_indices].sum(axis=1).A1
-
-    # Step 2: Flexible matching for partial matches (if enabled)
-    partial_scores = np.zeros(len(texts))
+    # Preprocess keywords and texts if flexible search is enabled
     if flexible_search:
-        keyword_patterns = {
-            kw: re.compile(rf"\b{lemmatizer.lemmatize(kw)}\w*\b", re.IGNORECASE) for kw in keywords
-        }
-        for i, text in enumerate(texts):
-            partial_scores[i] = sum(len(pattern.findall(text)) for pattern in keyword_patterns.values())
+        keyword_patterns = {}
+        processed_keywords = []
+        for kw in keywords:
+            p_kw = process_text(kw)
+            processed_keywords.append(p_kw)
+            keyword_patterns[kw] = re.compile(rf"\b{re.escape(p_kw)}\b", re.IGNORECASE)
 
-    # Step 3: Combine scores with weights
-    final_scores = full_match_scores + 0.5 * partial_scores  # Give partial matches a lower weight
-
-    # Normalize scores between 0 and 1
-    min_score, max_score = final_scores.min(), final_scores.max()
-    if max_score > min_score:
-        normalized_scores = (final_scores - min_score) / (max_score - min_score)
+        keywords = processed_keywords
+        texts = [process_text(text) for text in texts]
     else:
-        normalized_scores = final_scores  # Avoid division by zero for uniform scores
+        keyword_patterns = {
+            kw: re.compile(rf"\b{re.escape(kw)}\b", re.IGNORECASE) for kw in keywords
+        }
 
-    return normalized_scores
-
-def compute_tfidf_scores(texts, keywords):
-    # Create TF-IDF vectorizer with ngram_range=(1, 2)
-    vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
-    tfidf_matrix = vectorizer.fit_transform(texts)
-
-    # Extract keyword indices (terms that match the provided keywords)
-    keyword_indices = [i for i, term in enumerate(vectorizer.get_feature_names_out()) if term in keywords]
-
-    # Sum TF-IDF scores for each website based on the keywords
-    keyword_scores = tfidf_matrix[:, keyword_indices].sum(axis=1).A1
-
-    # Count the missing keywords for each website
-    missing_keywords_count = []
     for i, text in enumerate(texts):
-        matches = sum([1 for keyword in keywords if keyword in text.lower()])
-        missing_keywords_count.append(len(keywords) - matches)
+        # Calculate keyword matches
+        matches = {kw: len(re.findall(pattern, text)) for kw, pattern in keyword_patterns.items()}
+        total_match_count = sum(matches.values())
+        keyword_matches.append(matches)
+        total_matches.append(total_match_count)
 
-    # Calculate penalty based on missing keywords (more missing = higher penalty)
-    penalty = np.array(missing_keywords_count) / len(keywords)
+    # Perform TF-IDF analysis if advanced search is enabled
+    # Perform Cosine Similarity analysis if advanced search is enabled
+    if advanced_search:
+        # Combine keywords into a single string
+        keyword_phrase = " ".join(keywords)
 
-    # Apply penalty to keyword scores (subtract penalty from the raw score)
-    adjusted_scores = keyword_scores * (1 - penalty)  # Penalty decreases the score for missing keywords
+        # Create the content list, with the keyword phrase as the first item
+        content = [keyword_phrase] + texts  # Add keywords as the first item (the query)
 
-    # Normalize the scores between 0 and 1
-    min_score = np.min(adjusted_scores)
-    max_score = np.max(adjusted_scores)
-    normalized_scores = (adjusted_scores - min_score) / (max_score - min_score)
+        # Create the TF-IDF vectorizer
+        vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, len(keyword_phrase.split())))
 
-    return normalized_scores
+        # Vectorize the content (keyword phrase + websites)
+        tfidf_matrix = vectorizer.fit_transform(content)
 
+        # Calculate cosine similarity between the keyword phrase and each website's content
+        cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+
+        # Combine cosine similarity with total keyword matches
+        alpha = 0.7  # Weight for cosine similarity
+        beta = 0.3   # Weight for total matches
+        hybrid_scores = [
+            alpha * similarity + beta * (matches / (max(total_matches)+1))  # Normalize matches
+            for similarity, matches in zip(cosine_similarities, total_matches)
+        ]
+
+        # Normalize the hybrid scores to the range [0, 1]
+        min_score, max_score = min(hybrid_scores), max(hybrid_scores)
+        if max_score > min_score:
+            relevance_scores = [(score - min_score) / (max_score - min_score) for score in hybrid_scores]
+
+        # # Calculate the relevance scores
+        # relevance_scores = list(cosine_similarities)
+        #
+        # # Normalize the relevance scores to the range [0, 1]
+        # min_score, max_score = min(relevance_scores), max(relevance_scores)
+        # if max_score > min_score:
+        #     relevance_scores = [(score - min_score) / (max_score - min_score) for score in relevance_scores]
+
+    return keyword_matches, total_matches, relevance_scores
 
 def main():
     st.title("Website Keyword Scanner")
@@ -217,22 +225,27 @@ def main():
 
                 # Calculate relevance scores (including flexible search if enabled)
                 if texts:
+                    keyword_matches, total_matches, relevance_scores = analyze_texts(
+                        texts=texts,
+                        keywords=keywords,
+                        flexible_search=flexible_search,
+                        advanced_search=advanced_search
+                    )
+
+                    data = {
+                        "URL": valid_urls,
+                        "Keywords Found": keyword_matches,
+                        "Total Matches": total_matches,
+                    }
+
+                    result_df = pd.DataFrame(data)
+
                     if advanced_search:
-                        relevance_scores = compute_relevance_scores(texts, keywords, flexible_search=flexible_search)
-                        data = {
-                            "URL": valid_urls,
-                            "Keywords Found": [{kw: text.count(kw) for kw in keywords} for text in texts],
-                            "Total Matches": [sum(text.count(kw) for kw in keywords) for text in texts],
-                            "Relevance Score": relevance_scores.flatten()
-                        }
-                        result_df = pd.DataFrame(data).sort_values(by='Relevance Score', ascending=False)
+                        result_df["Relevance Score"] = relevance_scores
+                        result_df = result_df.sort_values(by='Relevance Score', ascending=False)
                     else:
-                        data = {
-                            "URL": valid_urls,
-                            "Keywords Found": [{kw: text.count(kw) for kw in keywords} for text in texts],
-                            "Total Matches": [sum(text.count(kw) for kw in keywords) for text in texts],
-                        }
-                        result_df = pd.DataFrame(data).sort_values(by='Total Matches', ascending=False)
+                        result_df = result_df.sort_values(by='Total Matches', ascending=False)
+
                     st.write("Scanning complete!")
                     st.dataframe(result_df, column_config={
                         "URL": st.column_config.LinkColumn(width="medium")
