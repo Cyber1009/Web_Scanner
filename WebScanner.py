@@ -24,6 +24,11 @@ try:
 except LookupError:
     nltk.download('omw-1.4')
 
+try:
+    nltk.download('punkt_tab')
+except:
+    pass
+
 # try:
 #     download_corpora.download_corpora()  # Try downloading corpora
 # except Exception:
