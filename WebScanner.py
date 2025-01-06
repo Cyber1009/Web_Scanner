@@ -29,6 +29,8 @@ try:
 except:
     pass
 
+lemmatizer = WordNetLemmatizer()
+
 # try:
 #     download_corpora.download_corpora()  # Try downloading corpora
 # except Exception:
