@@ -2,6 +2,7 @@ import httpx
 import nltk
 import asyncio
 import re
+import requests
 import pandas as pd
 import streamlit as st
 from nltk.tokenize import word_tokenize
@@ -9,7 +10,7 @@ from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -97,6 +98,20 @@ def parse_html(content):
     text = headers + " " + body  # Combine headers with body text
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
+def parse_html_sub(base_url, content):
+    soup = BeautifulSoup(content, "html.parser")
+    # Extract all links
+    subpage_urls = set()  # Use a set to avoid duplicates
+    for link in soup.find_all('a', href=True):
+        href = link['href']
+        # Convert relative URLs to absolute URLs
+        full_url = urljoin(base_url, href)
+        # Validate the URL
+        if is_valid_url(full_url, base_url):
+            subpage_urls.add(full_url)
+
+    return list(subpage_urls)
+
 def process_text(text):
     # Tokenize the text using NLTK's word_tokenize
     words = word_tokenize(text)
@@ -161,13 +176,122 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
         min_score, max_score = min(hybrid_scores), max(hybrid_scores)
         if max_score > min_score:
             relevance_scores = [(score - min_score) / (max_score - min_score) for score in hybrid_scores]
-            
+
     return keyword_matches, total_matches, relevance_scores
 
+def is_valid_url(url, base_url):
+    """Validate if the URL belongs to the same domain as the base URL."""
+    parsed_base = urlparse(base_url)
+    parsed_url = urlparse(url)
+
+    # Check if it's the same domain and a valid HTTP/HTTPS URL
+    return parsed_url.scheme in ['http', 'https'] and parsed_base.netloc == parsed_url.netloc
+
+# def extract_subpage_urls(base_url):
+#     headers = {
+#         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+#     }
+#     # try:
+#     #     async with httpx.AsyncClient(follow_redirects=True) as client:
+#     #         response = await client.get(base_url, headers=headers, timeout=10)
+#     #         response.raise_for_status()
+#     #         return url, response.text, True  # Success on HTTPS
+#         # Fetch the webpage content
+#         response = requests.get(base_url, timeout=10)
+#         response.raise_for_status()  # Raise an error for HTTP issues
+#         html_content = response.text
+#         st.write(html_content)
+#
+#         # Parse the HTML
+#         soup = BeautifulSoup(html_content, 'html.parser')
+#
+#         # Extract all links
+#         subpage_urls = set()  # Use a set to avoid duplicates
+#         for link in soup.find_all('a', href=True):
+#             href = link['href']
+#             # Convert relative URLs to absolute URLs
+#             full_url = urljoin(base_url, href)
+#             # Validate the URL
+#             if is_valid_url(full_url, base_url):
+#                 subpage_urls.add(full_url)
+#
+#         return list(subpage_urls)
+#     #
+#     # except requests.RequestException as e:
+#     #     print(f"Error fetching {base_url}: {e}")
+#     #     return []
 
 def main():
     st.title("Website Keyword Scanner")
-    uploaded_file = st.file_uploader("Upload a file with URLs", type=["csv", "xlsx"])
+    st.write(" ")
+    global urls
+    urls = []
+
+
+    st.subheader("Please enter URL for scanning:")
+    col1, col2, col3 = st.columns([6, 1, 1.5], vertical_alignment="bottom")
+
+    with col1:
+        e_urls_input = st.text_input("", placeholder="Please manually enter URL(s) for scanning (Comma-separated)")
+
+    with col2:
+        e_button = st.button("Enter")
+
+    with col3:
+        s_button = st.button("Sub-link")
+
+    st.write(" ")
+    st.subheader("Or upload a file with URLs:")
+    # st.write("or")
+    uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+
+    # URL input for single scanning
+    if e_urls_input:
+        # st.write("yes!")
+        e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
+        try:
+            urls, invalid_urls = check_url(e_urls)
+            if not urls:
+                st.error("Please enter valid URLs.")
+                return
+            else:
+                input_option = "URLs entered by the user"
+        except Exception:
+            st.error("Failed to read the URL entered. Please try again.")
+            return
+
+    if s_button:
+        st.subheader(" ", divider="gray")
+        e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
+        try:
+            urls, invalid_urls = check_url(e_urls)
+            if not urls:
+                st.error("Please enter valid URLs.")
+                return
+            else:
+                st.write("Url:")
+                st.write(urls)
+                # Fetch and parse HTML for each valid URL
+                results = asyncio.run(fetch_all_urls(urls))
+                subs = []
+                valid_urls = []
+                for url, content, success in results:
+                    if success:
+                        sub = {}
+                        sub[url] = parse_html_sub(url, content)
+                        subs.append(sub)
+                        valid_urls.append(url)
+                    else:
+                        invalid_urls.append(url)
+            st.write("Subpages:")
+            st.write(subs)
+            st.write("invalid urls: ")
+            st.write(invalid_urls)
+
+        except Exception:
+            st.error("Failed to extract subpages from the URL entered. Please try again.")
+            return
+
     if uploaded_file:
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
@@ -175,30 +299,59 @@ def main():
             df = pd.read_excel(uploaded_file)
         st.dataframe(df.head())
 
-        url_column = st.selectbox("Select the URL column name:", df.columns)
 
-        keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
-        flexible_search = st.checkbox("Enable Flexible Search",
-                                      help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
-        advanced_search = st.checkbox("Enable Advanced Search",
-                                      help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
-
-        if st.button("Scan"):
-
-            keywords = [kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()]
-
-            if not (url_column and keywords):
-                st.error("Please enter URL column and keywords.")
-                return
+        url_column = st.selectbox("Select the column that contains valid URLs:",
+                                  df.columns,
+                                  index=None,
+                                  placeholder="select url column...",
+                                  )
+        if url_column:
             try:
                 c_urls = df[url_column].dropna().tolist()
                 urls, invalid_urls = check_url(c_urls)
                 if not urls:
                     st.error(f"No valid URLs found in column '{url_column}'.")
                     return
+                input_option = "URLs from the upload file"
             except Exception:
                 st.error(f"Cannot read the URL column '{url_column}'.")
                 return
+    if urls:
+    # if urls and (e_button or uploaded_file): # modify this later
+        # st.write("Currently searching with:", input_option)
+        st.subheader(" ", divider="gray")
+        st.write("Valid URLs detected!")
+        mk_inpt = ''' Currently searching with:  ''' + ''':orange-background[''' + input_option + ''']'''
+        st.write(mk_inpt)
+
+        sample_urls = []
+        for i in range (5):
+            try:
+                sample_urls.append(urls[i])
+            except:
+                pass
+        sample_urls.append("...")
+        st.write(sample_urls)
+
+        keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
+        flexible_search = st.checkbox("Enable Flexible Search",
+                                      help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
+        advanced_search = st.checkbox("Enable Advanced Search",
+                                      help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
+        if st.button("Scan"):
+            keywords = list(set(kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()))
+            if not keywords:
+                st.error("Please enter valid keywords or phrases")
+                return
+            # try:
+            #     c_urls = df[url_column].dropna().tolist()
+            #     urls, invalid_urls = check_url(c_urls)
+            #     if not urls:
+            #         st.error(f"No valid URLs found in column '{url_column}'.")
+            #         return
+            # except Exception:
+            #     st.error(f"Cannot read the URL column '{url_column}'.")
+            #     return
 
             with st.spinner("Scanning websites... This may take a while."):
 
