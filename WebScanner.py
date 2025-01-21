@@ -1,3 +1,5 @@
+from os import write
+
 import httpx
 import nltk
 import asyncio
@@ -222,45 +224,72 @@ def is_valid_url(url, base_url):
 #     #     return []
 
 def main():
+
     st.title("Website Keyword Scanner")
     st.write(" ")
-    global urls
     urls = []
 
+    # st.markdown(block_style, unsafe_allow_html=True)
+    # main_col1, main_col2 = st.columns([1,999])
+    # with st.container():
+    # with main_col2:
 
-    st.subheader("Please enter URL for scanning:")
-    col1, col2, col3 = st.columns([6, 1, 1.5], vertical_alignment="bottom")
+    tab1, tab2 = st.tabs(["Enter URLs manually", "Upload file with URLs"])
 
-    with col1:
-        e_urls_input = st.text_input("", placeholder="Please manually enter URL(s) for scanning (Comma-separated)")
+    with tab1:
 
-    with col2:
-        e_button = st.button("Enter")
+    # with st.expander('Enter or upload URLs:', expanded=True):
 
-    with col3:
-        s_button = st.button("Sub-link")
+        st.subheader("Enter URLs for scanning:")
+        col1, col2, col3 = st.columns([6, 1, 1.5], vertical_alignment="bottom")
 
-    st.write(" ")
-    st.subheader("Or upload a file with URLs:")
-    # st.write("or")
-    uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+        with col1:
+            e_urls_input = st.text_input(" ", placeholder="Enter URLs here (Comma-separated)")
 
+        with col2:
+            e_button = st.button("Enter")
+
+        with col3:
+            s_button = st.button("Sub-link")
+
+        # st.write(" ")
+        # st.subheader("Or upload a file with URLs:")
+        # uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+
+    with tab2:
+
+        st.subheader("Upload a file with URLs:")
+        uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+        if uploaded_file:
+            if uploaded_file.name.endswith(".csv"):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            st.dataframe(df.head())
+
+            url_column = st.selectbox("Select the column that contains valid URLs:",
+                                      df.columns,
+                                      index=None,
+                                      placeholder="select url column...",
+                                      )
+
+    e_urls = None
     # URL input for single scanning
-    if e_urls_input:
-        # st.write("yes!")
-        e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
+    if e_button:
+        uploaded_file = None
+        re_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
         try:
-            urls, invalid_urls = check_url(e_urls)
-            if not urls:
+            e_urls, invalid_urls = check_url(re_urls)
+            if not e_urls:
                 st.error("Please enter valid URLs.")
                 return
-            else:
-                input_option = "URLs entered by the user"
+            input_option = "User input"
         except Exception:
             st.error("Failed to read the URL entered. Please try again.")
             return
 
     if s_button:
+        input_option = None
         st.subheader(" ", divider="gray")
         e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
         try:
@@ -292,19 +321,21 @@ def main():
             st.error("Failed to extract subpages from the URL entered. Please try again.")
             return
 
+
+
     if uploaded_file:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        st.dataframe(df.head())
+        # if uploaded_file.name.endswith(".csv"):
+        #     df = pd.read_csv(uploaded_file)
+        # else:
+        #     df = pd.read_excel(uploaded_file)
+        # st.dataframe(df.head())
 
+        # url_column = st.selectbox("Select the column that contains valid URLs:",
+        #                           df.columns,
+        #                           index=None,
+        #                           placeholder="select url column...",
+        #                           )
 
-        url_column = st.selectbox("Select the column that contains valid URLs:",
-                                  df.columns,
-                                  index=None,
-                                  placeholder="select url column...",
-                                  )
         if url_column:
             try:
                 c_urls = df[url_column].dropna().tolist()
@@ -312,33 +343,44 @@ def main():
                 if not urls:
                     st.error(f"No valid URLs found in column '{url_column}'.")
                     return
-                input_option = "URLs from the upload file"
+                input_option = uploaded_file.name + " [" + url_column + "]"
             except Exception:
                 st.error(f"Cannot read the URL column '{url_column}'.")
                 return
-    if urls:
+
+
+    if urls or e_urls:
     # if urls and (e_button or uploaded_file): # modify this later
         # st.write("Currently searching with:", input_option)
-        st.subheader(" ", divider="gray")
-        st.write("Valid URLs detected!")
-        mk_inpt = ''' Currently searching with:  ''' + ''':orange-background[''' + input_option + ''']'''
-        st.write(mk_inpt)
+        # st.subheader(" ", divider="gray")
+        if input_option == "User input":
+            urls = e_urls
 
-        sample_urls = []
-        for i in range (5):
-            try:
-                sample_urls.append(urls[i])
-            except:
-                pass
-        sample_urls.append("...")
-        st.write(sample_urls)
+        # st.divider()
+        st.write(" ")
+        # mk_inpt = ''' Valid URL(s) detected from  ''' + ''':gray-background[''' + input_option + ''']:'''
+        # mk_inpt = ''' Valid URL(s) detected from: ***''' + input_option + '''***'''
+        # f" {len(urls)} valid urls detected from ***{input_option}***"
+        with st.container(border=True):
+            st.markdown(f" {len(urls)} valid urls detected from ***{input_option}***" )
+            st.write(urls[:5] + (["..."] if len(urls) > 5 else []))
+            # st.write(f" {len(invalid_urls)} invalid urls found")
 
-        keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
-        flexible_search = st.checkbox("Enable Flexible Search",
-                                      help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
-        advanced_search = st.checkbox("Enable Advanced Search",
-                                      help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
+        # keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
+        keywords_input = st.text_input(" ", placeholder="Enter keywords/phrases (Comma-separated):")
+
+        with st.expander("Advanced Search Options"):
+        #     # st.write('Detailed information hidden here')
+        # flexible_search = st.checkbox("Enable Flexible Search")
+            flexible_search = st.checkbox("Enable Flexible Search",
+                                          help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
+
+            advanced_search = st.checkbox("Enable Advanced Search",
+                                          help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
+
+
         if st.button("Scan"):
+            st.write(urls[:5] + (["..."] if len(urls) > 5 else []))
             keywords = list(set(kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()))
             if not keywords:
                 st.error("Please enter valid keywords or phrases")
@@ -392,7 +434,7 @@ def main():
                     else:
                         result_df = result_df.sort_values(by='Total Matches', ascending=False)
 
-                    st.write("Scanning complete!")
+                    st.write("***Scanning complete!***")
                     st.dataframe(result_df, column_config={
                         "URL": st.column_config.LinkColumn(width="medium")
                     })
