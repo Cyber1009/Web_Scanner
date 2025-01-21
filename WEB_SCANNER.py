@@ -1,16 +1,18 @@
-import pandas as pd
+from os import write
+
 import httpx
 import nltk
+import asyncio
+import re
+import requests
+import pandas as pd
+import streamlit as st
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import re
-import streamlit as st
-from nltk.stem import WordNetLemmatizer
-import asyncio
-from urllib.parse import urlparse
-from textblob import TextBlob
-
+from urllib.parse import urljoin, urlparse
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -21,6 +23,11 @@ try:
     nltk.data.find('corpora/omw-1.4')
 except LookupError:
     nltk.download('omw-1.4')
+
+try:
+    nltk.download('punkt_tab')
+except:
+    pass
 
 lemmatizer = WordNetLemmatizer()
 
@@ -40,6 +47,7 @@ def check_url(url_list):
         else:
             invalid_urls.append(u)
     return valid_urls, invalid_urls
+
 
 async def fetch_url(url, retries=2):
     headers = {
@@ -66,6 +74,7 @@ async def fetch_url(url, retries=2):
                     pass
     return url, None, False  # Final failure after all retries
 
+
 async def fetch_all_urls(urls):
     progress = st.progress(0)  # Initialize the progress bar
     total_urls = len(urls)
@@ -91,12 +100,27 @@ def parse_html(content):
     text = headers + " " + body  # Combine headers with body text
     return re.sub(r"\s+", " ", text.lower())  # Clean up extra spaces and normalize to lowercase
 
+def parse_html_sub(base_url, content):
+    soup = BeautifulSoup(content, "html.parser")
+    # Extract all links
+    subpage_urls = set()  # Use a set to avoid duplicates
+    for link in soup.find_all('a', href=True):
+        href = link['href']
+        # Convert relative URLs to absolute URLs
+        full_url = urljoin(base_url, href)
+        # Validate the URL
+        if is_valid_url(full_url, base_url):
+            subpage_urls.add(full_url)
+
+    return list(subpage_urls)
+
 def process_text(text):
-    words = TextBlob(text).words
-    return ' '.join([word.lemmatize() for word in words])
+    # Tokenize the text using NLTK's word_tokenize
+    words = word_tokenize(text)
+    lemmatized_words = [lemmatizer.lemmatize(word) for word in words]
+    return ' '.join(lemmatized_words)
 
 def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False):
-
     # Initialize results
     keyword_matches = []
     total_matches = []
@@ -136,58 +160,240 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
 
         # Create the TF-IDF vectorizer
         vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, len(keyword_phrase.split())))
-
         # Vectorize the content (keyword phrase + websites)
         tfidf_matrix = vectorizer.fit_transform(content)
 
         # Calculate cosine similarity between the keyword phrase and each website's content
         cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-        print(cosine_similarities)
 
-        # Calculate the relevance scores
-        relevance_scores = list(cosine_similarities)
+        # Combine cosine similarity with total keyword matches
+        alpha = 0.7  # Weight for cosine similarity
+        beta = 0.3  # Weight for total matches
+        hybrid_scores = [
+            alpha * similarity + beta * (matches / (max(total_matches) + 1))  # Normalize matches
+            for similarity, matches in zip(cosine_similarities, total_matches)
+        ]
 
-        # Normalize the relevance scores to the range [0, 1]
-        min_score, max_score = min(relevance_scores), max(relevance_scores)
+        # Normalize the hybrid scores to the range [0, 1]
+        min_score, max_score = min(hybrid_scores), max(hybrid_scores)
         if max_score > min_score:
-            relevance_scores = [(score - min_score) / (max_score - min_score) for score in relevance_scores]
+            relevance_scores = [(score - min_score) / (max_score - min_score) for score in hybrid_scores]
 
     return keyword_matches, total_matches, relevance_scores
 
+def is_valid_url(url, base_url):
+    """Validate if the URL belongs to the same domain as the base URL."""
+    parsed_base = urlparse(base_url)
+    parsed_url = urlparse(url)
+
+    # Check if it's the same domain and a valid HTTP/HTTPS URL
+    return parsed_url.scheme in ['http', 'https'] and parsed_base.netloc == parsed_url.netloc
+
+# def extract_subpage_urls(base_url):
+#     headers = {
+#         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+#     }
+#     # try:
+#     #     async with httpx.AsyncClient(follow_redirects=True) as client:
+#     #         response = await client.get(base_url, headers=headers, timeout=10)
+#     #         response.raise_for_status()
+#     #         return url, response.text, True  # Success on HTTPS
+#         # Fetch the webpage content
+#         response = requests.get(base_url, timeout=10)
+#         response.raise_for_status()  # Raise an error for HTTP issues
+#         html_content = response.text
+#         st.write(html_content)
+#
+#         # Parse the HTML
+#         soup = BeautifulSoup(html_content, 'html.parser')
+#
+#         # Extract all links
+#         subpage_urls = set()  # Use a set to avoid duplicates
+#         for link in soup.find_all('a', href=True):
+#             href = link['href']
+#             # Convert relative URLs to absolute URLs
+#             full_url = urljoin(base_url, href)
+#             # Validate the URL
+#             if is_valid_url(full_url, base_url):
+#                 subpage_urls.add(full_url)
+#
+#         return list(subpage_urls)
+#     #
+#     # except requests.RequestException as e:
+#     #     print(f"Error fetching {base_url}: {e}")
+#     #     return []
+
 def main():
+
     st.title("Website Keyword Scanner")
-    uploaded_file = st.file_uploader("Upload a file with URLs", type=["csv", "xlsx"])
-    if uploaded_file:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        st.dataframe(df.head())
+    st.write(" ")
+    urls = []
 
-        url_column = st.selectbox("Select the URL column name:", df.columns)
+    # st.markdown(block_style, unsafe_allow_html=True)
+    # main_col1, main_col2 = st.columns([1,999])
+    # with st.container():
+    # with main_col2:
 
-        keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
-        flexible_search = st.checkbox("Enable Flexible Search",
-                                      help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
-        advanced_search = st.checkbox("Enable Advanced Search",
-                                      help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
+    tab1, tab2 = st.tabs(["Enter URLs manually", "Upload file with URLs"])
 
-        if st.button("Scan"):
+    with tab1:
 
-            keywords = [kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()]
+    # with st.expander('Enter or upload URLs:', expanded=True):
 
-            if not (url_column and keywords):
-                st.error("Please enter URL column and keywords.")
+        st.subheader("Enter URLs for scanning:")
+        col1, col2, col3 = st.columns([6, 1, 1.5], vertical_alignment="bottom")
+
+        with col1:
+            e_urls_input = st.text_input(" ", placeholder="Enter URLs here (Comma-separated)")
+
+        with col2:
+            e_button = st.button("Enter")
+
+        with col3:
+            s_button = st.button("Sub-link")
+
+        # st.write(" ")
+        # st.subheader("Or upload a file with URLs:")
+        # uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+
+    with tab2:
+
+        st.subheader("Upload a file with URLs:")
+        uploaded_file = st.file_uploader(" ", type=["csv", "xlsx"])
+        if uploaded_file:
+            if uploaded_file.name.endswith(".csv"):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            st.dataframe(df.head())
+
+            url_column = st.selectbox("Select the column that contains valid URLs:",
+                                      df.columns,
+                                      index=None,
+                                      placeholder="select url column...",
+                                      )
+
+    e_urls = None
+    # URL input for single scanning
+    if e_button:
+        uploaded_file = None
+        re_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
+        try:
+            e_urls, invalid_urls = check_url(re_urls)
+            if not e_urls:
+                st.error("Please enter valid URLs.")
                 return
+            input_option = "User input"
+        except Exception:
+            st.error("Failed to read the URL entered. Please try again.")
+            return
+
+    if s_button:
+        input_option = None
+        st.subheader(" ", divider="gray")
+        e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
+        try:
+            urls, invalid_urls = check_url(e_urls)
+            if not urls:
+                st.error("Please enter valid URLs.")
+                return
+            else:
+                st.write("Url:")
+                st.write(urls)
+                # Fetch and parse HTML for each valid URL
+                results = asyncio.run(fetch_all_urls(urls))
+                subs = []
+                valid_urls = []
+                for url, content, success in results:
+                    if success:
+                        sub = {}
+                        sub[url] = parse_html_sub(url, content)
+                        subs.append(sub)
+                        valid_urls.append(url)
+                    else:
+                        invalid_urls.append(url)
+            st.write("Subpages:")
+            st.write(subs)
+            st.write("invalid urls: ")
+            st.write(invalid_urls)
+
+        except Exception:
+            st.error("Failed to extract subpages from the URL entered. Please try again.")
+            return
+
+
+
+    if uploaded_file:
+        # if uploaded_file.name.endswith(".csv"):
+        #     df = pd.read_csv(uploaded_file)
+        # else:
+        #     df = pd.read_excel(uploaded_file)
+        # st.dataframe(df.head())
+
+        # url_column = st.selectbox("Select the column that contains valid URLs:",
+        #                           df.columns,
+        #                           index=None,
+        #                           placeholder="select url column...",
+        #                           )
+
+        if url_column:
             try:
                 c_urls = df[url_column].dropna().tolist()
                 urls, invalid_urls = check_url(c_urls)
                 if not urls:
                     st.error(f"No valid URLs found in column '{url_column}'.")
                     return
+                input_option = uploaded_file.name + " [" + url_column + "]"
             except Exception:
                 st.error(f"Cannot read the URL column '{url_column}'.")
                 return
+
+
+    if urls or e_urls:
+    # if urls and (e_button or uploaded_file): # modify this later
+        # st.write("Currently searching with:", input_option)
+        # st.subheader(" ", divider="gray")
+        if input_option == "User input":
+            urls = e_urls
+
+        # st.divider()
+        st.write(" ")
+        # mk_inpt = ''' Valid URL(s) detected from  ''' + ''':gray-background[''' + input_option + ''']:'''
+        # mk_inpt = ''' Valid URL(s) detected from: ***''' + input_option + '''***'''
+        # f" {len(urls)} valid urls detected from ***{input_option}***"
+        with st.container(border=True):
+            st.markdown(f" {len(urls)} valid urls detected from ***{input_option}***" )
+            st.write(urls[:5] + (["..."] if len(urls) > 5 else []))
+            # st.write(f" {len(invalid_urls)} invalid urls found")
+
+        # keywords_input = st.text_input("Enter keywords/phrases (Comma-separated):")
+        keywords_input = st.text_input(" ", placeholder="Enter keywords/phrases (Comma-separated):")
+
+        with st.expander("Advanced Search Options"):
+        #     # st.write('Detailed information hidden here')
+        # flexible_search = st.checkbox("Enable Flexible Search")
+            flexible_search = st.checkbox("Enable Flexible Search",
+                                          help="This option will match keywords with their base form, ignoring plural forms and verb tenses, to increase the flexibility of the search.")
+
+            advanced_search = st.checkbox("Enable Advanced Search",
+                                          help="This option calculates the relevance score of each website using advanced algorithms. Scanning might take longer.")
+
+
+        if st.button("Scan"):
+            st.write(urls[:5] + (["..."] if len(urls) > 5 else []))
+            keywords = list(set(kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()))
+            if not keywords:
+                st.error("Please enter valid keywords or phrases")
+                return
+            # try:
+            #     c_urls = df[url_column].dropna().tolist()
+            #     urls, invalid_urls = check_url(c_urls)
+            #     if not urls:
+            #         st.error(f"No valid URLs found in column '{url_column}'.")
+            #         return
+            # except Exception:
+            #     st.error(f"Cannot read the URL column '{url_column}'.")
+            #     return
 
             with st.spinner("Scanning websites... This may take a while."):
 
@@ -220,12 +426,15 @@ def main():
                         "Total Matches": total_matches,
                     }
 
-                    result_df = pd.DataFrame(data).sort_values(by='Total Matches', ascending=False)
-                    if advanced_search and relevance_scores:
-                        result_df["Relevance Score"] = relevance_scores
-                        result_df.sort_values(by='Relevance Score', ascending=False)
+                    result_df = pd.DataFrame(data)
 
-                    st.write("Scanning complete!")
+                    if advanced_search:
+                        result_df["Relevance Score"] = relevance_scores
+                        result_df = result_df.sort_values(by='Relevance Score', ascending=False)
+                    else:
+                        result_df = result_df.sort_values(by='Total Matches', ascending=False)
+
+                    st.write("***Scanning complete!***")
                     st.dataframe(result_df, column_config={
                         "URL": st.column_config.LinkColumn(width="medium")
                     })
