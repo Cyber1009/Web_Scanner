@@ -367,10 +367,7 @@ def main():
                 results = asyncio.run(fetch_all_urls(urls))
                 urls_cont, inac_urls = results
                 inv_urls.extend(inac_urls)
-                # st.write('ewew')
-                # st.write(inac_urls)
-                # st.write('sfa')
-                # st.write(inv_urls)
+
                 for url, content in urls_cont:
                     # if success:
                     url_data = {
@@ -384,6 +381,7 @@ def main():
                     sub_links = parse_html_sub(url, content) if sub_option else False
 
                     if sub_option and sub_links:
+                        sub_links = list(set(sub_links))
                         sub_results = asyncio.run(fetch_all_urls(sub_links))
                         sub_urls_cont, sub_inac_urls = sub_results
                         # inv_urls.extend(sub_inac_urls)
