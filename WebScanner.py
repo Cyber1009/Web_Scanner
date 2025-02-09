@@ -1,3 +1,4 @@
+from os import write
 
 import httpx
 import nltk
@@ -5,13 +6,14 @@ import asyncio
 import re
 import pandas as pd
 import streamlit as st
-from os import write
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from urllib.parse import urljoin, urlparse
+
+
 # from streamlit import session_state
 
 try:
@@ -76,6 +78,7 @@ async def fetch_url(client, url, retries=2):
 async def fetch_all_urls(urls):
     retries = 2
     progress = st.progress(0)
+    # progress_text = st.empty()
     total_urls = len(urls)
     batch_size = min(30, total_urls)
     results = []
@@ -98,6 +101,7 @@ async def fetch_all_urls(urls):
                     modified_url = url_fetched.replace("https://", "http://") if url_fetched.startswith("https://") else url_fetched
                     failed_urls.append(modified_url)
             progress.progress(min((i + batch_size) / total_urls, 1.0))
+        # progress_text.write(f"(Progress for current url: {i}/{total_urls})")
 
 
     # Phase 2: Retry failed URLs using a client with verify=False
@@ -348,12 +352,15 @@ def main():
                 results = asyncio.run(fetch_all_urls(urls))
                 urls_cont, inac_urls = results
                 inv_urls.extend(inac_urls)
-
+                # st.write('ewew')
+                # st.write(inac_urls)
+                # st.write('sfa')
+                # st.write(inv_urls)
                 for url, content in urls_cont:
                     # if success:
                     url_data = {
                         "Main URL": url,
-                        # "Subpage URL": url,
+                        "Subpage URL": url,
                         "Content": parse_html(content)
                         # "Keywords Found": "keyword1, keyword2",
                     }
@@ -364,7 +371,7 @@ def main():
                     if sub_option and sub_links:
                         sub_results = asyncio.run(fetch_all_urls(sub_links))
                         sub_urls_cont, sub_inac_urls = sub_results
-                        inv_urls.extend(sub_inac_urls)
+                        # inv_urls.extend(sub_inac_urls)
                         for s_url, content in sub_urls_cont:
                             sub_data = {
                                 "Main URL": url,
@@ -374,23 +381,39 @@ def main():
                             }
                             urls_data.append(sub_data)
 
+                    # valid_urls.append(url)
+
+                # inv_urls.extend(inac_urls)
             c_data = pd.DataFrame(urls_data)
 
             st.session_state.data = c_data
-            data_exist = True
-
-            st.dataframe(c_data, column_config={
+            # data_exist = True
+            if sub_option and sub_links:
+                st.dataframe(c_data, column_config={
                     "URL": st.column_config.LinkColumn(width="medium")
                 })
-
+            else:
+                st.dataframe(c_data[["Main URL","Content"]], column_config={
+                        "URL": st.column_config.LinkColumn(width="medium")
+                    })
+            # if inv_urls:
+            #     inv_urls_df = pd.DataFrame(inv_urls, columns=["Invalid URL"])
+            # if inac_urls:
+            #     inac_urls_df = pd.DataFrame(inac_urls, columns=["Invalid URL"])
+            #
+            #
             if inv_urls:
                 st.write("Invalid URLs:")
-
+                # st.write(inv_urls)
+                # inv_urls_df = pd.DataFrame(inv_urls)
                 inv_urls_df = pd.DataFrame(inv_urls, columns=["Invalid URL", "Status"])
-
+                # # inv_urls_df["Status"] = "invalid"
                 st.dataframe(inv_urls_df, column_config={
                     "Status": st.column_config.LinkColumn(width="medium")
                 })
+                # st.dataframe(inv_urls_df, column_config={
+                #     "Status": st.column_config.LinkColumn(width="medium")
+                # })
 
         # if st.session_state.data:
         # if c_data_exist = True
@@ -431,6 +454,11 @@ def main():
                     st.session_state.data["Keywords Found"] = keyword_matches
                     st.session_state.data["Total Matches"] =  total_matches
 
+                    # s_data = {
+                    #     "URL": valid_urls,
+                    #     "Keywords Found": keyword_matches,
+                    #     "Total Matches": total_matches,
+                    # }
 
                     result_df = pd.DataFrame(st.session_state.data)
 
