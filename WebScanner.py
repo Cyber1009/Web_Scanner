@@ -26,14 +26,14 @@ try:
 except LookupError:
     nltk.download('omw-1.4')
 
-# try:
-#     nltk.download('punkt_tab')
-# except:
-#     pass
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+    nltk.download('punkt_tab')
+except:
+    pass
+# try:
+#     nltk.data.find('tokenizers/punkt')
+# except LookupError:
+#     nltk.download('punkt')
 
 
 lemmatizer = WordNetLemmatizer()
