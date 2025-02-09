@@ -1,21 +1,18 @@
-from os import write
 
 import httpx
 import nltk
 import asyncio
 import re
-import requests
 import pandas as pd
 import streamlit as st
+from os import write
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from urllib.parse import urljoin, urlparse
-
-from streamlit import session_state
-
+# from streamlit import session_state
 
 try:
     nltk.data.find('corpora/wordnet')
@@ -27,28 +24,38 @@ try:
 except LookupError:
     nltk.download('omw-1.4')
 
+# try:
+#     nltk.download('punkt_tab')
+# except:
+#     pass
 try:
-    nltk.download('punkt_tab')
-except:
-    pass
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 
 lemmatizer = WordNetLemmatizer()
 
 def check_url(url_list):
     valid_urls = []
     invalid_urls = []
+
     for u in url_list:
         uc = u.strip()
+
+        # Automatically prepend "https://" only if it starts with "www."
         if uc.startswith("www."):
             uc = "https://" + uc
-        if not uc.startswith(("http://", "https://")):
-            invalid_urls.append(u)
-            continue
+
+        # Parse the URL
         parsed = urlparse(uc)
-        if parsed.scheme and parsed.netloc:
+
+        # Check if the URL is valid
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
             valid_urls.append(uc)
         else:
-            invalid_urls.append(u)
+            invalid_urls.append((u, "Invalid Format"))
+
     return valid_urls, invalid_urls
 
 
@@ -56,43 +63,61 @@ async def fetch_url(client, url, retries=2):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
     }
-
+    error_message = "Unknown Error"
     for attempt in range(1, retries + 1):
         try:
-            # async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(url, headers=headers, timeout=10)
             response.raise_for_status()
-            return url, response.text, True  # Success on HTTPS
+            return url, response.text, True
         except Exception as e:
-            # print(f"Attempt {attempt} failed for {url} with error: {e}")
-            if attempt == retries:  # On final failure, try HTTP fallback
-                http_url = url.replace("https://", "http://") if url.startswith("https://") else url
-                try:
-                    async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
-                        response = await client.get(http_url, headers=headers, timeout=10)
-                        response.raise_for_status()
-                        return http_url, response.text, True  # Success on HTTP fallback
-                except Exception as e:
-                    # print(f"HTTP fallback failed for {url}: {e}")
-                    pass
-    return url, None, False  # Final failure after all retries
-
+            error_message = str(e)
+    return url, error_message, False
 
 async def fetch_all_urls(urls):
+    retries = 2
     progress = st.progress(0)
     total_urls = len(urls)
-    batch_size = 30
+    batch_size = min(30, total_urls)
     results = []
-
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    failed_urls = []
+    invalid_urls = []
+    # Phase 1: Use a client with verify=True
+    async with httpx.AsyncClient(follow_redirects=True, verify=True) as client:
         for i in range(0, total_urls, batch_size):
             batch = urls[i:i + batch_size]
-            tasks = [fetch_url(client, url) for url in batch]
+            tasks = [fetch_url(client, url, retries=retries) for url in batch]
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-            results.extend(batch_results)
+            for res in batch_results:
+                if isinstance(res, Exception):
+                    # In rare cases, an exception may be raised by gather.
+                    continue
+                url_fetched, content, success = res
+                if success:
+                    results.append((url_fetched, content))
+                else:
+                    modified_url = url_fetched.replace("https://", "http://") if url_fetched.startswith("https://") else url_fetched
+                    failed_urls.append(modified_url)
             progress.progress(min((i + batch_size) / total_urls, 1.0))
+
+
+    # Phase 2: Retry failed URLs using a client with verify=False
+    # failed_urls = [url for url, (u, content, success) in results_dict.items() if not success]
+    if failed_urls:
+        async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+            tasks = [fetch_url(client, url, retries=retries) for url in failed_urls]
+            retry_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in retry_results:
+                if isinstance(res, Exception):
+                    continue
+                url_fetched, content, success = res
+                if success:
+                    results.append((url_fetched, content))
+                else:
+                    invalid_urls.append((url_fetched,content))
+            #     results_dict[url_fetched] = (url_fetched, content, success)
+            #     return url, error_message, False
     progress.empty()
-    return results
+    return results, invalid_urls
 
 def parse_html(content):
     soup = BeautifulSoup(content, "html.parser")
@@ -135,7 +160,6 @@ def analyze_texts(texts, keywords, flexible_search=False, advanced_search=False)
     total_matches = []
     relevance_scores = None
 
-    ########################## debug
     if not texts or not keywords:
         st.error("No valid text or keywords available for analysis.")
         return [], [], None
@@ -207,13 +231,13 @@ def main():
 
     st.title("Website Keyword Scanner")
     st.write(" ")
-    inv_url = []
-    data_exist = False
+    inv_urls = []
+    # inac_urls = []
 
     if "valid_urls" not in st.session_state:
         st.session_state.valid_urls = []
-    if "invalid_urls" not in st.session_state:
-        st.session_state.invalid_urls = []
+    # if "invalid_urls" not in st.session_state:
+    #     st.session_state.invalid_urls = []
     if "option" not in st.session_state:
         st.session_state.option = []
     # if "keywords" not in st.session_state:
@@ -241,11 +265,7 @@ def main():
         #     s_button = st.button("Sub-link")
 
         if e_button:
-            # st.session_state.option = "User input"
-            # st.session_state.valid_urls = []
-            # st.session_state.invalid_urls = []
-            uploaded_file = None
-            url_column = None
+
             raw_e_urls = list(set([u.strip().lower() for u in e_urls_input.split(',') if u.strip()]))
             try:
                 e_urls, e_invalid_urls = check_url(raw_e_urls)
@@ -254,9 +274,9 @@ def main():
                     return
                 else:
                     st.session_state.valid_urls = e_urls
-                    inv_url = e_invalid_urls
-                    st.session_state.invalid_urls = e_invalid_urls
-                    st.session_state.option = "User input"
+                    inv_urls = e_invalid_urls
+                    # st.session_state.invalid_urls = e_invalid_urls
+                    # st.session_state.option = "User input"
             except Exception:
                 st.error("Failed to read the URL entered. Please try again.")
                 return
@@ -294,8 +314,8 @@ def main():
                         return
                     elif b_button:
                         st.session_state.valid_urls = f_urls
-                        st.session_state.invalid_urls = f_invalid_urls
-                        inv_url = f_invalid_urls
+                        # st.session_state.invalid_urls = f_invalid_urls
+                        inv_urls = f_invalid_urls
                         st.session_state.option = uploaded_file.name + " , column '" + url_column + "'"
                 except Exception:
                     st.error(f"Cannot read the URL column '{url_column}'.")
@@ -305,6 +325,7 @@ def main():
     if st.session_state.valid_urls and st.session_state.option:
 
         urls = st.session_state.valid_urls
+        # inv_urls = inv_urls
         # st.divider()
         st.write(" ")
         with st.container(border=True):
@@ -314,46 +335,45 @@ def main():
 
         col4, col5, col6 = st.columns([1, 5, 1], vertical_alignment="bottom")
         with col4:
-            c_button = st.button("Craw")
+            crawl_button = st.button("Crawl")
         with col5:
-            sub_button = st.checkbox("Craw all Subpages",
+            sub_option = st.checkbox("Crawl all Subpages",
                                           help="This option will fetch content from all subpages of all given links. Significantly increase scanning time.")
 
-        if c_button:
-            invalid_urls = inv_url
+        if crawl_button:
+            # invalid_urls = inv_url
             with st.spinner("Scanning websites... This may take a while."):
-                valid_urls = []
+                # valid_urls = []
                 urls_data = []
                 results = asyncio.run(fetch_all_urls(urls))
-                for url, content, success in results:
-                    if success:
-                        url_data = {
-                            "Main URL": url,
-                            "Subpage URL": url,
-                            "Content": parse_html(content)
-                            # "Keywords Found": "keyword1, keyword2",
-                        }
-                        urls_data.append(url_data)
-                        if sub_button:
-                            sub_links = parse_html_sub(url, content)
-                        else:
-                            sub_links = False
+                urls_cont, inac_urls = results
+                inv_urls.extend(inac_urls)
 
-                        if sub_button and sub_links:
-                            sub_results = asyncio.run(fetch_all_urls(sub_links))
-                            for s_url, content, success in sub_results:
-                                if success:
-                                    sub_data = {
-                                        "Main URL": url,
-                                        "Subpage URL": s_url,
-                                        "Content": parse_html(content)
-                                        # "Keywords Found": "keyword1, keyword2",
-                                    }
-                                    urls_data.append(sub_data)
+                for url, content in urls_cont:
+                    # if success:
+                    url_data = {
+                        "Main URL": url,
+                        # "Subpage URL": url,
+                        "Content": parse_html(content)
+                        # "Keywords Found": "keyword1, keyword2",
+                    }
+                    urls_data.append(url_data)
 
-                        valid_urls.append(url)
-                    else:
-                        invalid_urls.append(url)
+                    sub_links = parse_html_sub(url, content) if sub_option else False
+
+                    if sub_option and sub_links:
+                        sub_results = asyncio.run(fetch_all_urls(sub_links))
+                        sub_urls_cont, sub_inac_urls = sub_results
+                        inv_urls.extend(sub_inac_urls)
+                        for s_url, content in sub_urls_cont:
+                            sub_data = {
+                                "Main URL": url,
+                                "Subpage URL": s_url,
+                                "Content": parse_html(content)
+                                # "Keywords Found": "keyword1, keyword2",
+                            }
+                            urls_data.append(sub_data)
+
             c_data = pd.DataFrame(urls_data)
 
             st.session_state.data = c_data
@@ -363,11 +383,13 @@ def main():
                     "URL": st.column_config.LinkColumn(width="medium")
                 })
 
-            if invalid_urls:
+            if inv_urls:
                 st.write("Invalid URLs:")
-                inv_urls_df = pd.DataFrame(invalid_urls, columns=["Invalid URL"])
+
+                inv_urls_df = pd.DataFrame(inv_urls, columns=["Invalid URL", "Status"])
+
                 st.dataframe(inv_urls_df, column_config={
-                    "Invalid URL": st.column_config.LinkColumn()
+                    "Status": st.column_config.LinkColumn(width="medium")
                 })
 
         # if st.session_state.data:
@@ -389,17 +411,8 @@ def main():
                 advanced_search = st.checkbox("Enable Advanced Search",
                                               help="This option calculates the relevance score (0 to 1) of each website using advanced algorithms. The website that is the most relevant to the keywords is given a score of 1.")
 
-            # st.write(list(c_data["Content"]))
-            # st.write("hi", keywords_input)
             search_button = st.button("Search")
             if search_button:
-
-                # st.write(c_data["Content"])
-
-                # # invalid_urls = st.session_state.invalid_urls
-                # invalid_urls = inv_url
-                # # st.write(urls[:5] + (["..."] if len(urls) > 5 else []))
-
 
                 keywords = list(set(kw.strip().lower() for kw in keywords_input.split(',') if kw.strip()))
                 if not keywords:
@@ -407,12 +420,7 @@ def main():
                     return
 
                 with st.spinner("Searching contents... This may take a while."):
-                    #
-                    # # Initialize lists to hold URL and text content
-                    # texts, valid_urls = [], []
 
-                    # Calculate relevance scores (including flexible search if enabled)
-                    # if c_data:
                     keyword_matches, total_matches, relevance_scores = analyze_texts(
                         texts= list(st.session_state.data["Content"]),
                         keywords=keywords,
@@ -423,11 +431,6 @@ def main():
                     st.session_state.data["Keywords Found"] = keyword_matches
                     st.session_state.data["Total Matches"] =  total_matches
 
-                    # s_data = {
-                    #     "URL": valid_urls,
-                    #     "Keywords Found": keyword_matches,
-                    #     "Total Matches": total_matches,
-                    # }
 
                     result_df = pd.DataFrame(st.session_state.data)
 
