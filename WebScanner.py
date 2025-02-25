@@ -280,7 +280,7 @@ def main():
                     st.session_state.valid_urls = e_urls
                     inv_urls = e_invalid_urls
                     # st.session_state.invalid_urls = e_invalid_urls
-                    # st.session_state.option = "User input"
+                    st.session_state.option = "User input"
             except Exception:
                 st.error("Failed to read the URL entered. Please try again.")
                 return
